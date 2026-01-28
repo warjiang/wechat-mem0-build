@@ -11,6 +11,9 @@ on:
         required: true
         default: 'main'
 
+  schedule:
+    - cron: '0 20 * * *' # 北京时间 04:00 (UTC 20:00)
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -25,7 +28,7 @@ jobs:
         with:
           repository: ai-hermes/wechat-mem0
           token: ${{ secrets.PRIVATE_REPO_PAT }}
-          ref: ${{ github.event.inputs.branch || github.ref_name }}
+          ref: ${{ github.event.inputs.branch || (github.ref_type == 'tag' && github.ref_name) || 'main' }}
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -64,9 +67,12 @@ jobs:
 
       - name: Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule'
         with:
-          draft: true
+          tag_name: ${{ github.event_name == 'schedule' && 'nightly' || '' }}
+          prerelease: ${{ github.event_name == 'schedule' }}
+          target_commitish: ${{ github.sha }}
+          draft: false
           files: |
             release/*.exe
             release/*.zip
