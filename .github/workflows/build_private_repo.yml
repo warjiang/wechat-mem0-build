@@ -1,15 +1,15 @@
 name: Build Private Repository
 
 on:
+  push:
+    tags:
+      - v*.*.*
   workflow_dispatch:
     inputs:
       branch:
         description: 'Branch to build (ignored if tag is provided)'
         required: true
         default: 'main'
-      tag:
-        description: 'Tag to build (optional)'
-        required: false
 
 jobs:
   build:
@@ -25,7 +25,7 @@ jobs:
         with:
           repository: ai-hermes/wechat-mem0
           token: ${{ secrets.PRIVATE_REPO_PAT }}
-          ref: ${{ github.event.inputs.tag != '' && github.event.inputs.tag || github.event.inputs.branch }}
+          ref: ${{ github.event.inputs.branch || github.ref_name }}
 
       - name: Install Node.js
         uses: actions/setup-node@v4
