@@ -26,6 +26,11 @@ jobs:
       TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
       DMX_API_TOKEN: ${{ secrets.DMX_API_TOKEN }}
       DMX_API_USER: ${{ secrets.DMX_API_USER }}
+      CSC_LINK: ${{ secrets.MAC_CERTS }}
+      CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTS_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       
     strategy:
       matrix:
