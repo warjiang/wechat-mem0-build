@@ -38,7 +38,7 @@ jobs:
     strategy:
       matrix:
         # os: [ubuntu-latest, macos-latest, windows-latest]
-        os: [macos-latest]
+        os: [macos-latest, windows-latest]
     steps:
       - name: Checkout Private Repository
         uses: actions/checkout@v4
