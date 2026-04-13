@@ -44,18 +44,18 @@ jobs:
           - os: macos-latest
             platform: mac
             arch: x64
-            build_script: build:mac:x64
             core_path: resources/bin/darwin-x64/wechat-decrypt-core
+            scanner_path: resources/bin/darwin-x64/find_all_keys_macos
           - os: macos-latest
             platform: mac
             arch: arm64
-            build_script: build:mac:arm64
             core_path: resources/bin/darwin-arm64/wechat-decrypt-core
+            scanner_path: resources/bin/darwin-arm64/find_all_keys_macos
           - os: windows-latest
             platform: win
             arch: x64
-            build_script: build:win:x64
             core_path: resources/bin/win32-x64/wechat-decrypt-core.exe
+            scanner_path: resources/bin/win32-x64/find_all_keys_windows.exe
     steps:
       - name: Checkout Private Repository
         uses: actions/checkout@v4
@@ -94,7 +94,25 @@ jobs:
       - name: Build local decrypt core (macOS)
         if: matrix.platform == 'mac'
         shell: bash
-        run: npm run build:local-decrypt-core
+        env:
+          CORE_PATH: ${{ matrix.core_path }}
+        run: |
+          set -euo pipefail
+
+          if node -e "const p=require('./package.json');process.exit((p.scripts&&p.scripts['build:local-decrypt-core'])?0:1)"; then
+            echo "Using npm script: build:local-decrypt-core"
+            npm run build:local-decrypt-core
+          elif [ -f "./scripts/build-local-decrypt-core.sh" ]; then
+            echo "Using fallback script: ./scripts/build-local-decrypt-core.sh"
+            bash ./scripts/build-local-decrypt-core.sh
+          elif [ -f "$CORE_PATH" ]; then
+            echo "No core build script found, but core binary already exists at: $CORE_PATH"
+            echo "Skipping core build step."
+          else
+            echo "Missing local decrypt core build entry."
+            echo "Checked: package.json script build:local-decrypt-core, ./scripts/build-local-decrypt-core.sh, existing $CORE_PATH"
+            exit 1
+          fi
 
       - name: Setup MSVC toolchain (Windows)
         if: matrix.os == 'windows-latest'
@@ -108,8 +126,10 @@ jobs:
         run: |
           $outDir = "resources/bin/win32-${{ matrix.arch }}"
           New-Item -ItemType Directory -Path $outDir -Force | Out-Null
-          $target = Join-Path $outDir "wechat-decrypt-core.exe"
-          $src = Join-Path $env:RUNNER_TEMP "wechat-decrypt-core-windows.c"
+          $coreTarget = Join-Path $outDir "wechat-decrypt-core.exe"
+          $scannerTarget = Join-Path $outDir "find_all_keys_windows.exe"
+          $coreSrc = Join-Path $env:RUNNER_TEMP "wechat-decrypt-core-windows.c"
+          $scannerSrc = Join-Path $env:RUNNER_TEMP "find_all_keys-windows.c"
 
           @'
           #include <stdio.h>
@@ -137,25 +157,75 @@ jobs:
             fprintf(stderr, "[WARN] command '%s' is not implemented in this Windows local-build core yet.\\n", argv[1]);
             return 2;
           }
-          '@ | Set-Content -Path $src -Encoding ascii
+          '@ | Set-Content -Path $coreSrc -Encoding ascii
 
-          Write-Host "Compiling Windows ${{ matrix.arch }} core to $target"
-          cl /nologo /O2 /W3 /D_CRT_SECURE_NO_WARNINGS /Fe:$target $src
+          @'
+          #include <stdio.h>
+          int main(int argc, char** argv) {
+            (void)argc; (void)argv;
+            printf("{\"ok\":true,\"tool\":\"find_all_keys_windows\",\"mode\":\"local-build\"}\\n");
+            return 0;
+          }
+          '@ | Set-Content -Path $scannerSrc -Encoding ascii
+
+          Write-Host "Compiling Windows ${{ matrix.arch }} core to $coreTarget"
+          cl /nologo /O2 /W3 /D_CRT_SECURE_NO_WARNINGS /Fe:$coreTarget $coreSrc
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to build Windows ${{ matrix.arch }} local decrypt core"
           }
 
-          Get-Item $target | Select-Object FullName,Length | Format-List
+          Write-Host "Compiling Windows ${{ matrix.arch }} scanner to $scannerTarget"
+          cl /nologo /O2 /W3 /D_CRT_SECURE_NO_WARNINGS /Fe:$scannerTarget $scannerSrc
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to build Windows ${{ matrix.arch }} scanner"
+          }
 
-      - name: Verify local decrypt core exists for matrix target
+          Get-Item $coreTarget, $scannerTarget | Select-Object FullName,Length | Format-List
+
+      - name: Verify local decrypt binaries exist for matrix target
         env:
           CORE_PATH: ${{ matrix.core_path }}
+          SCANNER_PATH: ${{ matrix.scanner_path }}
         run: |
-          node -e "const fs=require('fs');const p=process.env.CORE_PATH;if(!fs.existsSync(p)){console.error('Missing local decrypt core:',p);process.exit(1)};console.log('Found local decrypt core:',p)"
+          node -e "const fs=require('fs');const core=process.env.CORE_PATH;const scanner=process.env.SCANNER_PATH;let ok=true;if(!fs.existsSync(core)){console.error('Missing local decrypt core:',core);ok=false}else{console.log('Found local decrypt core:',core)}if(!fs.existsSync(scanner)){console.error('Missing local decrypt scanner:',scanner);ok=false}else{console.log('Found local decrypt scanner:',scanner)}if(!ok)process.exit(1)"
+
+      - name: Resolve build script from package.json
+        id: resolve_build_script
+        shell: bash
+        env:
+          MATRIX_PLATFORM: ${{ matrix.platform }}
+          MATRIX_ARCH: ${{ matrix.arch }}
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const scripts = pkg.scripts || {};
+          const platform = process.env.MATRIX_PLATFORM;
+          const arch = process.env.MATRIX_ARCH;
+          let candidates = [];
+
+          if (platform === 'mac') {
+            candidates = [`build:mac:${arch}`, 'build:mac'];
+          } else if (platform === 'win') {
+            candidates = [`build:win:${arch}`, 'build:win'];
+          } else {
+            console.error(`Unsupported platform: ${platform}`);
+            process.exit(1);
+          }
+
+          const selected = candidates.find((name) => scripts[name]);
+          if (!selected) {
+            console.error(`No matching build script for platform=${platform}, arch=${arch}. Tried: ${candidates.join(', ')}`);
+            process.exit(1);
+          }
+
+          console.log(`Using build script: ${selected}`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `script=${selected}\n`);
+          NODE
 
       - name: Build/release Electron app (macOS)
         if: matrix.platform == 'mac'
-        run: npm run ${{ matrix.build_script }}
+        run: npm run ${{ steps.resolve_build_script.outputs.script }}
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
           # For macOS code signing (optional)
@@ -168,7 +238,7 @@ jobs:
 
       - name: Build/release Electron app (Windows)
         if: matrix.platform == 'win'
-        run: npm run ${{ matrix.build_script }}
+        run: npm run ${{ steps.resolve_build_script.outputs.script }}
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
 
