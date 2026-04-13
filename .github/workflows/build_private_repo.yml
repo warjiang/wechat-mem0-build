@@ -56,11 +56,6 @@ jobs:
             arch: x64
             build_script: build:win:x64
             core_path: resources/bin/win32-x64/wechat-decrypt-core.exe
-          - os: windows-latest
-            platform: win
-            arch: arm64
-            build_script: build:win:arm64
-            core_path: resources/bin/win32-arm64/wechat-decrypt-core.exe
     steps:
       - name: Checkout Private Repository
         uses: actions/checkout@v4
@@ -91,10 +86,10 @@ jobs:
         shell: bash
         run: |
           npm install --no-save \
-            @rollup/rollup-win32-${{ matrix.arch }}-msvc \
-            @esbuild/win32-${{ matrix.arch }} \
-            lightningcss-win32-${{ matrix.arch }}-msvc \
-            @tailwindcss/oxide-win32-${{ matrix.arch }}-msvc
+            @rollup/rollup-win32-x64-msvc \
+            @esbuild/win32-x64 \
+            lightningcss-win32-x64-msvc \
+            @tailwindcss/oxide-win32-x64-msvc
 
       - name: Build local decrypt core (macOS)
         if: matrix.platform == 'mac'
@@ -105,7 +100,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: ilammy/msvc-dev-cmd@v1
         with:
-          arch: ${{ matrix.arch == 'arm64' && 'amd64_arm64' || 'x64' }}
+          arch: x64
 
       - name: Build local decrypt core (Windows)
         if: matrix.os == 'windows-latest'
